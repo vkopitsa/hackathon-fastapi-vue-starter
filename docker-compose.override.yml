@@ -1,0 +1,130 @@
+version: "3.3"
+services:
+
+  proxy:
+    ports:
+      - "8089:80"
+      - "8090:8080"
+    command:
+      # Enable Docker in Traefik, so that it reads labels from Docker services
+      - --providers.docker
+      # Add a constraint to only use services with the label for this stack
+      # from the env var TRAEFIK_TAG
+      - --providers.docker.constraints=Label(`traefik.constraint-label-stack`, `${TRAEFIK_TAG?Variable not set}`)
+      # Do not expose all Docker services, only the ones explicitly exposed
+      - --providers.docker.exposedbydefault=false
+      # Disable Docker Swarm mode for local development
+      # - --providers.docker.swarmmode
+      # Enable the access log, with HTTP requests
+      - --accesslog
+      # Enable the Traefik log, for configurations and errors
+      - --log
+      # Enable the Dashboard and API
+      - --api
+      # Enable the Dashboard and API in insecure mode for local development
+      - --api.insecure=true
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-traefik-public-http.rule=Host(`${DOMAIN?Variable not set}`)
+      - traefik.http.services.${STACK_NAME?Variable not set}-traefik-public.loadbalancer.server.port=80
+
+  base:
+    build:
+      context: ./backend
+      args:
+        INSTALL_DEV: ${INSTALL_DEV-true}
+
+  pgadmin:
+    ports:
+      - "5050:5050"
+
+  flower:
+    ports:
+      - "5555:5555"
+
+  backend:
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./backend:/app
+    environment:
+      - SERVER_HOST=http://${DOMAIN?Variable not set}
+      - BACKEND_CORS_ORIGINS=["*"]
+    command: uvicorn --reload --host 0.0.0.0 --port 80 --log-level info app.main:app
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label-stack=${TRAEFIK_TAG?Variable not set}
+      - traefik.http.routers.${STACK_NAME?Variable not set}-backend-http.rule=PathPrefix(`/api`) || PathPrefix(`/docs`) || PathPrefix(`/redoc`)
+      - traefik.http.services.${STACK_NAME?Variable not set}-backend.loadbalancer.server.port=80
+
+  backend-alembic:
+    volumes:
+      - ./backend:/app
+
+  celeryworker:
+    volumes:
+      - ./backend:/app
+    environment:
+      - RUN=celery worker -A app.worker -l info -Q main-queue -c 1
+      - SERVER_HOST=http://${DOMAIN?Variable not set}
+
+  backend-test:
+    extends: base
+    depends_on:
+      queue:
+        condition: service_started
+      celeryworker:
+        condition: service_started
+      backend-test-db:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      - SERVER_NAME=test
+      - SERVER_HOST=http://test
+      - PROJECT_NAME=test
+      - POSTGRES_SERVER=backend-test-db
+      - SENTRY_DSN=https://public@sentry.example.com/1
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=changethis
+      - POSTGRES_DB=app
+    volumes:
+      - ./backend:/app
+    command: make prestart && make test
+    logging:
+      options:
+        max-size: "200k"
+        max-file: "10"
+
+  backend-test-db:
+    image: postgres:12
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=changethis
+      - POSTGRES_DB=app
+    ports:
+      - 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+    logging:
+      options:
+        max-size: "200k"
+        max-file: "10"
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        FRONTEND_ENV: dev
+    labels:
+      - traefik.enable=true
+      - traefik.constraint-label-stack=${TRAEFIK_TAG?Variable not set}
+      - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.rule=PathPrefix(`/`)
+      - traefik.http.services.${STACK_NAME?Variable not set}-frontend.loadbalancer.server.port=80
+
+networks:
+  traefik-public:
+    # For local dev, don't expect an external Traefik network
+    external: false

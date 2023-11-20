@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-test-deploy:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:12
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: changethis
+          POSTGRES_DB: app
+        ports:
+          # Maps tcp port 5432 on service container to the host
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      queue:
+        image: rabbitmq:3
+        ports:
+          # Maps tcp port 5432 on service container to the host
+          - 5672:5672
+
+    env:
+      SERVER_NAME: test
+      SERVER_HOST: http://test
+      PROJECT_NAME: test
+      POSTGRES_SERVER: localhost
+      SENTRY_DSN: https://public@sentry.example.com/1
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: changethis
+      POSTGRES_DB: app
+      FIRST_SUPERUSER: admin@example.com
+      FIRST_SUPERUSER_PASSWORD: changethis
+      RABBITMQ_URI: amqp://guest@127.0.0.1//
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.10' # Specify your Python version
+
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements-dev.txt
+        pip install -e .
+        make prestart
+
+    - name: Run Makefile clean
+      run: |
+        cd backend
+        make clean
+
+    - name: Run Makefile lint
+      run: |
+        cd backend
+        make lint
+
+    - name: Run Makefile test
+      run: |
+        cd backend
+        make test
+
+    - name: Run Makefile coverage
+      run: |
+        cd backend
+        make coverage
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v2
+      with:
+        node-version: '14' # Specify your Node.js version
+
+    - name: Install npm dependencies
+      run: |
+        cd frontend
+        npm install
+
+    - name: Run front-end tests
+      run: |
+        cd frontend
+        npm run test:unit
+
+    # Add deployment steps as needed
+    - name: Deploy
+      run: |
+        # Add your deployment commands here

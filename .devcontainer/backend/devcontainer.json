@@ -1,0 +1,36 @@
+{
+    "dockerComposeFile": ["../../docker-compose.yml", "../../docker-compose.override.yml"],
+    "service": "backend",
+    "runServices": ["db", "queue", "celeryworker", "pgadmin", "flower"],
+    "mounts": [
+        "source=${localWorkspaceFolder},target=/app,type=bind,consistency=cached"
+    ],
+    "workspaceFolder": "/app/backend",
+    "shutdownAction": "stopCompose",
+    "remoteUser": "python",
+    "containerEnv": {
+        "SHELL": "/bin/bash"
+    },
+    "postStartCommand": "pip install -e . && make prestart",
+    "postAttachCommand": "uvicorn --workers 1 --reload --host 0.0.0.0 --port 80 --log-level info app.main:app",
+    "overrideCommand": true,
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python",
+                "KevinRose.vsc-python-indent",
+                "donjayamanne.python-environment-manager",
+                "ms-python.flake8",
+                "ms-python.isort",
+                "wholroyd.jinja",
+                "magicstack.MagicPython",
+                "matangover.mypy",
+                "ms-python.vscode-pylance",
+                "nick-rudenko.back-n-forth"
+            ]
+        }
+    },
+    "forwardPorts": [
+        80
+    ]
+}

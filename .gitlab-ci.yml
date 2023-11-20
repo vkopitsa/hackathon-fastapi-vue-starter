@@ -1,0 +1,87 @@
+image: python:3.10
+
+stages:
+  - build
+  - test
+  - deploy
+
+cache:
+  paths:
+    - .cache/pip
+
+variables:
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: changethis
+  POSTGRES_DB: app
+  SERVER_NAME: test
+  SERVER_HOST: http://test
+  PROJECT_NAME: test
+  POSTGRES_SERVER: postgres
+  SENTRY_DSN: https://public@sentry.example.com/1
+  FIRST_SUPERUSER: admin@example.com
+  FIRST_SUPERUSER_PASSWORD: changethis
+  RABBITMQ_URI: amqp://guest@rabbitmq:5672//
+
+.before_script: &before_script
+  before_script:
+    - apt-get update && \
+      apt-get install -y make libpq-dev git tree gcc build-essential --no-install-recommends && \
+      apt-get clean && \
+      rm -rf /var/lib/apt/lists/*
+    - cd backend
+    - pip install -r requirements-dev.txt
+    - pip install -e .
+    - make prestart
+
+.before_deploy: &before_deploy
+  before_script:
+    - 'which ssh-agent || ( apt-get update -y && apt-get install openssh-client -y )'
+    - eval $(ssh-agent -s)
+    - ssh-add <(echo "$SSH_KEY")
+    - mkdir -p ~/.ssh
+    - '[[ -f /.dockerenv ]] && echo -e "Host *\n\tStrictHostKeyChecking no\n\n" > ~/.ssh/config'
+    - export CMD="cd $PROJECT_DIR &&
+      git fetch &&
+      git checkout $BRANCH &&
+      git pull origin $BRANCH"
+    - ssh -p$PORT $USER@$SERVER $CMD
+
+test-backend:
+  <<: *before_script
+  stage: test
+  services:
+    - postgres:12
+    - rabbitmq:3
+  script:
+    - make clean
+    - make lint
+    - make test
+    - make coverage
+  only:
+    - main
+
+test-frontend:
+  image: node:14
+  stage: test
+  script:
+    - cd frontend
+    - npm install
+    - npm run test:unit
+  only:
+    - main
+
+deploy:
+  <<: *before_deploy
+  stage: deploy
+  variables:
+      BRANCH: $CI_COMMIT_REF_NAME
+      SERVER: $SSH_SERVER
+      USER: $SSH_USER
+      PORT: $SSH_PORT
+      SSH_KEY: $SSH_PRIVATE_KEY
+      PROJECT_DIR: $PROJECT_DIR
+  script: 
+      - export CMD="cd $PROJECT_DIR && make deploy && make migrate"
+      - ssh -p$PORT $USER@$SERVER $CMD
+  only:
+    - main

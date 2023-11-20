@@ -1,0 +1,4 @@
+frontend/node_modules
+backend/.mypy_cache
+backend/.pytest_cache
+backend/.pytest_cache
